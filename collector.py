@@ -60,6 +60,7 @@ def main():
     sessions = set()
     active_days = set()
     model_usage = {}
+    processed_message_ids = set()
 
     def empty_bucket():
         return {
@@ -71,6 +72,14 @@ def main():
 
     def process_message(msg, session_id):
         nonlocal total_prompts, today_prompt_count, today_token_total
+        
+        # Deduplicate using message ID to prevent double-counting across different jsonl lines
+        msg_id = msg.get("id")
+        if msg_id:
+            if msg_id in processed_message_ids:
+                return
+            processed_message_ids.add(msg_id)
+
         ts_str = msg.get("timestamp")
         if ts_str:
             try:
