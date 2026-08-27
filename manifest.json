@@ -3,7 +3,7 @@
   "id": "oma.gemi",
   "name": "OmaGemi",
   "version": "1.0.0",
-  "author": "Stefan Stoller",
+  "author": "5t0ll1",
   "license": "MIT",
   "description": "Native Omarchy service plugin that aggregates Gemini CLI usage statistics for the status bar Agents widget.",
   "kinds": ["service"],
