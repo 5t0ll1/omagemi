@@ -6,6 +6,38 @@ import glob
 import datetime
 from pathlib import Path
 
+def calculate_cost(model_usage):
+    # Prices are in USD per 1 Million tokens
+    # Map model family patterns to (input_price_per_1M, output_price_per_1M, cached_price_per_1M)
+    pricing_map = {
+        "gemini-3.5-flash": (1.50, 9.00, 0.15),
+        "gemini-3.7-flash": (0.75, 3.75, 0.075),
+        "gemini-3.6-flash": (0.75, 3.75, 0.075),
+        "gemini-3.1-pro": (2.00, 12.00, 0.20),
+        "gemini-1.5-flash": (0.075, 0.30, 0.01875),
+        "gemini-1.5-pro": (1.25, 5.00, 0.3125),
+    }
+    
+    total_spent_usd = 0.0
+    for model_name, tokens in model_usage.items():
+        matched = "gemini-3.5-flash"
+        for p_model in pricing_map:
+            if p_model in model_name:
+                matched = p_model
+                break
+        
+        inp_p, out_p, cach_p = pricing_map[matched]
+        
+        inp = tokens.get("inputTokens") or 0
+        out = tokens.get("outputTokens") or 0
+        cach = tokens.get("cacheReadInputTokens") or 0
+        
+        cost = (inp * inp_p + out * out_p + cach * cach_p) / 1000000.0
+        total_spent_usd += cost
+        
+    # Convert USD to EUR (assuming standard conversion rate of ~0.90)
+    return total_spent_usd * 0.90
+
 def main():
     home = Path.home()
     usage_dir = home / ".local" / "state" / "omarchy" / "agents" / "usage"
@@ -127,6 +159,19 @@ def main():
             except Exception:
                 continue
 
+    # Calculate balance details
+    funded_budget = float(os.environ.get("GEMINI_FUNDED_BUDGET") or 25.0)
+    currency = os.environ.get("GEMINI_CURRENCY") or "EUR"
+    
+    # Calculate local spent
+    spent = calculate_cost(model_usage)
+    if currency != "EUR":
+        # Adjust spent if currency is USD (pricing is calculated in USD, converted to EUR by default)
+        # Convert EUR back to USD
+        spent = spent / 0.90
+        
+    remaining = max(0.0, funded_budget - spent)
+
     # Ensure there is some basic metadata even if no usage is found
     has_data = total_prompts > 0
     record = {
@@ -150,6 +195,13 @@ def main():
         "totalSessions": len(sessions),
         "activeDays": len(active_days),
         "activeDates": sorted(list(active_days)),
+        "balance": {
+            "funded": funded_budget,
+            "spent": round(spent, 4),
+            "remaining": round(remaining, 4),
+            "currency": currency,
+            "estimated": True
+        }
     }
 
     try:
