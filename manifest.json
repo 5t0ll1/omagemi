@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "stolli.omagemi",
+  "name": "OmaGemi",
+  "version": "1.0.0",
+  "author": "Stefan Stoller",
+  "license": "MIT",
+  "description": "Native Omarchy service plugin that aggregates Gemini CLI usage statistics for the status bar Agents widget.",
+  "kinds": ["service"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
