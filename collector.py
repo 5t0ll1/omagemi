@@ -37,65 +37,95 @@ def main():
             "cacheCreationInputTokens": 0,
         }
 
-    # Search for all Gemini CLI session json files in ~/.gemini/tmp/*/chats/*.json
-    search_path = str(home / ".gemini" / "tmp" / "*" / "chats" / "*.json")
-    for file_path_str in glob.glob(search_path):
-        try:
-            with open(file_path_str, "r") as f:
-                data = json.load(f)
-        except Exception:
-            continue
+    def process_message(msg, session_id):
+        nonlocal total_prompts, today_prompt_count, today_token_total
+        ts_str = msg.get("timestamp")
+        if ts_str:
+            try:
+                # Parse timestamp to local date
+                dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                day_str = dt.date().isoformat()
+            except Exception:
+                day_str = today_str
+        else:
+            day_str = today_str
 
-        session_id = data.get("sessionId")
-        if not session_id:
-            continue
+        tokens = msg.get("tokens") or {}
+        input_tokens = int(tokens.get("input") or 0)
+        output_tokens = int(tokens.get("output") or 0)
+        cached_tokens = int(tokens.get("cached") or 0)
+        thoughts_tokens = int(tokens.get("thoughts") or 0)
+        tool_tokens = int(tokens.get("tool") or 0)
+        total = input_tokens + output_tokens + cached_tokens + thoughts_tokens + tool_tokens
 
-        messages = data.get("messages") or []
-        for msg in messages:
-            if isinstance(msg, dict) and msg.get("type") == "gemini":
-                # Parse timestamp to date
-                ts_str = msg.get("timestamp")
-                if ts_str:
-                    try:
-                        # e.g., "2026-04-22T18:27:01.040Z"
-                        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                        day_str = dt.date().isoformat()
-                    except Exception:
-                        day_str = today_str
+        if total <= 0:
+            return
+
+        model = str(msg.get("model") or "gemini-3.5-flash").rstrip("/").split("/")[-1]
+
+        sessions.add(session_id)
+        active_days.add(day_str)
+        total_prompts += 1
+
+        # Update modelUsage
+        bucket = model_usage.setdefault(model, empty_bucket())
+        bucket["inputTokens"] += input_tokens
+        bucket["outputTokens"] += output_tokens
+        bucket["cacheReadInputTokens"] += cached_tokens
+
+        if day_str in recent:
+            recent[day_str]["messageCount"] += total
+
+        if day_str == today_str:
+            today_prompt_count += 1
+            today_sessions.add(session_id)
+            today_token_total += total
+            today_tokens_by_model[model] = today_tokens_by_model.get(model, 0) + total
+
+    # Search for all Gemini CLI session files in ~/.gemini/tmp/*/chats/*
+    for ext in ("*.json", "*.jsonl"):
+        search_path = str(home / ".gemini" / "tmp" / "*" / "chats" / ext)
+        for file_path_str in glob.glob(search_path):
+            try:
+                if file_path_str.endswith(".jsonl"):
+                    # Process JSON Lines format
+                    session_id = None
+                    with open(file_path_str, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                data = json.loads(line)
+                            except Exception:
+                                continue
+                            
+                            if "sessionId" in data:
+                                session_id = data["sessionId"]
+                            
+                            if isinstance(data, dict):
+                                messages = []
+                                if data.get("type") == "gemini":
+                                    messages = [data]
+                                elif "$set" in data and isinstance(data["$set"], dict) and "messages" in data["$set"]:
+                                    messages = data["$set"]["messages"]
+                                
+                                for msg in messages:
+                                    if isinstance(msg, dict) and msg.get("type") == "gemini":
+                                        process_message(msg, session_id or "unknown_session")
                 else:
-                    day_str = today_str
-
-                tokens = msg.get("tokens") or {}
-                input_tokens = int(tokens.get("input") or 0)
-                output_tokens = int(tokens.get("output") or 0)
-                cached_tokens = int(tokens.get("cached") or 0)
-                thoughts_tokens = int(tokens.get("thoughts") or 0)
-                tool_tokens = int(tokens.get("tool") or 0)
-                total = input_tokens + output_tokens + cached_tokens + thoughts_tokens + tool_tokens
-
-                if total <= 0:
-                    continue
-
-                model = str(msg.get("model") or "gemini-3-flash").rstrip("/").split("/")[-1]
-
-                sessions.add(session_id)
-                active_days.add(day_str)
-                total_prompts += 1
-
-                # Update modelUsage
-                bucket = model_usage.setdefault(model, empty_bucket())
-                bucket["inputTokens"] += input_tokens
-                bucket["outputTokens"] += output_tokens
-                bucket["cacheReadInputTokens"] += cached_tokens
-
-                if day_str in recent:
-                    recent[day_str]["messageCount"] += total
-
-                if day_str == today_str:
-                    today_prompt_count += 1
-                    today_sessions.add(session_id)
-                    today_token_total += total
-                    today_tokens_by_model[model] = today_tokens_by_model.get(model, 0) + total
+                    # Process standard JSON format
+                    with open(file_path_str, "r") as f:
+                        data = json.load(f)
+                    session_id = data.get("sessionId")
+                    if not session_id:
+                        continue
+                    messages = data.get("messages") or []
+                    for msg in messages:
+                        if isinstance(msg, dict) and msg.get("type") == "gemini":
+                            process_message(msg, session_id)
+            except Exception:
+                continue
 
     # Ensure there is some basic metadata even if no usage is found
     has_data = total_prompts > 0
