@@ -5,7 +5,7 @@ Item {
   id: root
 
   // Resolve the path to the collector script inside the active plugin folder
-  readonly property string collectorPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/stolli.omagemi/collector.py"
+  readonly property string collectorPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/oma.gemi/collector.py"
 
   Timer {
     id: refreshTimer

@@ -1,6 +1,6 @@
 # OmaGemi
 
-OmaGemi (`stolli.omagemi`) is a lightweight, highly secure, and native **Omarchy service plugin** (headless singleton) that integrates local Google Gemini CLI usage and token metrics directly into the native Omarchy status bar **Agents** widget.
+OmaGemi (`oma.gemi`) is a lightweight, highly secure, and native **Omarchy service plugin** (headless singleton) that integrates local Google Gemini CLI usage and token metrics directly into the native Omarchy status bar **Agents** widget.
 
 It automates the process of reading your Gemini CLI's project-specific session files and compiling them into a compliant usage record (`gemini.json`), which is then dynamically displayed as a first-class tab in your status bar alongside Claude Code and Codex.
 
@@ -17,7 +17,7 @@ It automates the process of reading your Gemini CLI's project-specific session f
 ## File Structure
 
 ```text
-stolli.omagemi/
+oma.gemi/
 ├── .gitignore          # Rigorous git exclusions for absolute safety
 ├── LICENSE             # MIT License
 ├── manifest.json       # Omarchy plugin metadata mapping our service entry point
@@ -45,18 +45,18 @@ To install this plugin locally under your active Omarchy shell:
 
 1.  Clone this repository to your local Omarchy plugins directory:
     ```bash
-    mkdir -p ~/.config/omarchy/plugins/stolli.omagemi
-    cp -r * ~/.config/omarchy/plugins/stolli.omagemi/
+    mkdir -p ~/.config/omarchy/plugins/oma.gemi
+    cp -r * ~/.config/omarchy/plugins/oma.gemi/
     ```
 
 2.  Make the Python collector script executable:
     ```bash
-    chmod +x ~/.config/omarchy/plugins/stolli.omagemi/collector.py
+    chmod +x ~/.config/omarchy/plugins/oma.gemi/collector.py
     ```
 
 3.  Validate the plugin using the Omarchy CLI tool:
     ```bash
-    omarchy plugin validate ~/.config/omarchy/plugins/stolli.omagemi/
+    omarchy plugin validate ~/.config/omarchy/plugins/oma.gemi/
     ```
 
 4.  Restart the Omarchy status bar to load the new service:
