@@ -84,6 +84,15 @@ Panel {
     command: ["python3", root.home + "/.config/omarchy/plugins/oma.gemi/collector.py"]
   }
 
+  Process {
+    id: saveConfigProcess
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.refreshNow()
+      }
+    }
+  }
+
   readonly property var days: root.record ? (root.record.recentDays || []) : []
   readonly property real weekPeak: {
     var peak = 0
@@ -334,6 +343,106 @@ Panel {
             InfoPair { label: "Today's Sessions"; value: root.record ? String(root.record.todaySessions) : "0" }
             InfoPair { label: "Total Tokens Today"; value: root.record ? root.formatTokenCount(root.record.todayTotalTokens) : "0" }
             InfoPair { label: "Active Days"; value: root.record ? String(root.record.activeDays) : "0" }
+          }
+
+          // ---------- Top-up Input Section ----------
+          PanelSeparator {
+            foreground: root.foreground
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(8)
+
+            PanelSectionHeader {
+              width: parent.width
+              text: "GUTHABEN AKTUALISIEREN"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Column {
+                width: (parent.width - Style.space(8)) / 2
+                spacing: Style.space(4)
+                Text {
+                  text: "Guthaben (€)"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                TextField {
+                  id: balanceField
+                  width: parent.width
+                  placeholderText: "z.B. 6.78"
+                  text: root.balance ? root.balance.remaining.toFixed(2) : ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  padding: Style.space(6)
+                  background: Rectangle {
+                    color: root.alpha(root.foreground, 0.05)
+                    border.color: balanceField.activeFocus ? root.track : root.dim
+                    border.width: 1
+                    radius: Style.cornerRadius
+                  }
+                }
+              }
+
+              Column {
+                width: (parent.width - Style.space(8)) / 2
+                spacing: Style.space(4)
+                Text {
+                  text: "Einzahlung (€)"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                TextField {
+                  id: fundedField
+                  width: parent.width
+                  placeholderText: "z.B. 25.00"
+                  text: root.balance ? root.balance.funded.toFixed(2) : ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  padding: Style.space(6)
+                  background: Rectangle {
+                    color: root.alpha(root.foreground, 0.05)
+                    border.color: fundedField.activeFocus ? root.track : root.dim
+                    border.width: 1
+                    radius: Style.cornerRadius
+                  }
+                }
+              }
+            }
+
+            Button {
+              id: saveButton
+              width: parent.width
+              text: "Guthaben Speichern"
+              bordered: true
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              verticalPadding: Style.spacing.controlPaddingY
+              onClicked: {
+                var balVal = parseFloat(balanceField.text)
+                var fundVal = parseFloat(fundedField.text)
+                if (!isNaN(balVal) && !isNaN(fundVal)) {
+                  saveConfigProcess.command = ["python3", "-c", 
+                    "import json, os, datetime; " +
+                    "path = os.path.expanduser('~/.config/omarchy/agents/gemini.json'); " +
+                    "data = {'fundedAmount': " + fundVal + ", 'currentBalance': " + balVal + ", 'currency': 'EUR', 'fundedAt': '" + (root.record ? root.record.updatedAt.substring(0, 10) : datetime.date.today().isoformat()) + "'}; " +
+                    "with open(path, 'w') as f: json.dump(data, f, indent=2)"
+                  ]
+                  saveConfigProcess.running = true
+                }
+              }
+            }
           }
 
           // ---------- Tokens by Day Section ----------
