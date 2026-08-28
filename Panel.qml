@@ -241,7 +241,7 @@ Panel {
             id: hero
             width: parent.width
             title: "Google Gemini"
-            meta: root.record ? root.record.tierLabel : "Pay-as-you-go"
+            meta: root.balance ? "Prepaid" : "Pay-as-you-go"
             foreground: root.foreground
             fontFamily: root.fontFamily
 
