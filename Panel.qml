@@ -488,6 +488,37 @@ Panel {
             }
           }
 
+          // ---------- Tokens by Model Section ----------
+          PanelSeparator {
+            visible: root.models.length > 0
+            foreground: root.foreground
+          }
+
+          Column {
+            id: modelSection
+            visible: root.models.length > 0
+            width: parent.width
+            spacing: Style.spacing.md
+
+            PanelSectionHeader {
+              width: parent.width
+              text: "TOKENS BY MODEL"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Repeater {
+              model: root.models
+
+              ModelRow {
+                required property var modelData
+                width: modelSection.width
+                row: modelData
+                share: modelData.total / Math.max(1, root.models[0].total)
+              }
+            }
+          }
+
           // ---------- Tokens by Day Section ----------
           PanelSeparator {
             visible: root.days.length > 0
@@ -518,37 +549,6 @@ Panel {
                 day: modelData
                 ratio: Number(modelData.messageCount || 0) / root.weekPeak
                 today: String(modelData.date || "") === root.todayDate()
-              }
-            }
-          }
-
-          // ---------- Tokens by Model Section ----------
-          PanelSeparator {
-            visible: root.models.length > 0
-            foreground: root.foreground
-          }
-
-          Column {
-            id: modelSection
-            visible: root.models.length > 0
-            width: parent.width
-            spacing: Style.spacing.md
-
-            PanelSectionHeader {
-              width: parent.width
-              text: "TOKENS BY MODEL"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            Repeater {
-              model: root.models
-
-              ModelRow {
-                required property var modelData
-                width: modelSection.width
-                row: modelData
-                share: modelData.total / Math.max(1, root.models[0].total)
               }
             }
           }
