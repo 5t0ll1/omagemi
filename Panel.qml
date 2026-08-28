@@ -356,20 +356,85 @@ Panel {
 
             PanelSectionHeader {
               width: parent.width
-              text: "GUTHABEN AKTUALISIEREN"
+              text: "GUTHABEN VERWALTEN"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
 
+            // 1. Top-up Row
             Row {
               width: parent.width
               spacing: Style.space(8)
 
               Column {
-                width: (parent.width - Style.space(8)) / 2
+                width: parent.width - Style.space(120)
                 spacing: Style.space(4)
                 Text {
-                  text: "Guthaben (€)"
+                  text: "Betrag aufladen (€) — addiert automatisch"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                TextField {
+                  id: topUpField
+                  width: parent.width
+                  placeholderText: "z.B. 20.00"
+                  text: ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  padding: Style.space(6)
+                  background: Rectangle {
+                    color: root.alpha(root.foreground, 0.05)
+                    border.color: topUpField.activeFocus ? root.track : root.dim
+                    border.width: 1
+                    radius: Style.cornerRadius
+                  }
+                }
+              }
+
+              Button {
+                id: topUpButton
+                width: Style.space(112)
+                anchors.bottom: parent.bottom
+                text: "Aufladen"
+                bordered: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                verticalPadding: Style.spacing.controlPaddingY
+                onClicked: {
+                  var val = parseFloat(topUpField.text)
+                  if (!isNaN(val) && val > 0) {
+                    saveConfigProcess.command = ["python3", "-c", 
+                      "import json, os, datetime; " +
+                      "path = os.path.expanduser('~/.config/omarchy/agents/gemini.json'); " +
+                      "data = {'fundedAmount': 25.0, 'currentBalance': 6.78, 'currency': 'EUR', 'fundedAt': '" + (root.record ? root.record.updatedAt.substring(0, 10) : datetime.date.today().isoformat()) + "'}; " +
+                      "if os.path.exists(path): " +
+                      "  try: " +
+                      "    with open(path, 'r') as f: data = json.load(f) " +
+                      "  except: pass; " +
+                      "data['fundedAmount'] = float(data.get('fundedAmount', 0)) + " + val + "; " +
+                      "data['currentBalance'] = float(data.get('currentBalance', 0)) + " + val + "; " +
+                      "with open(path, 'w') as f: json.dump(data, f, indent=2)"
+                    ]
+                    saveConfigProcess.running = true
+                    topUpField.text = ""
+                  }
+                }
+              }
+            }
+
+            // 2. Correction Row
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Column {
+                width: parent.width - Style.space(120)
+                spacing: Style.space(4)
+                Text {
+                  text: "Echten Kontostand korrigieren (€)"
                   color: root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
@@ -392,54 +457,32 @@ Panel {
                 }
               }
 
-              Column {
-                width: (parent.width - Style.space(8)) / 2
-                spacing: Style.space(4)
-                Text {
-                  text: "Einzahlung (€)"
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-                TextField {
-                  id: fundedField
-                  width: parent.width
-                  placeholderText: "z.B. 25.00"
-                  text: root.balance ? root.balance.funded.toFixed(2) : ""
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  padding: Style.space(6)
-                  background: Rectangle {
-                    color: root.alpha(root.foreground, 0.05)
-                    border.color: fundedField.activeFocus ? root.track : root.dim
-                    border.width: 1
-                    radius: Style.cornerRadius
+              Button {
+                id: correctButton
+                width: Style.space(112)
+                anchors.bottom: parent.bottom
+                text: "Korrigieren"
+                bordered: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                verticalPadding: Style.spacing.controlPaddingY
+                onClicked: {
+                  var val = parseFloat(balanceField.text)
+                  if (!isNaN(val)) {
+                    saveConfigProcess.command = ["python3", "-c", 
+                      "import json, os, datetime; " +
+                      "path = os.path.expanduser('~/.config/omarchy/agents/gemini.json'); " +
+                      "data = {'fundedAmount': 25.0, 'currentBalance': 6.78, 'currency': 'EUR', 'fundedAt': '" + (root.record ? root.record.updatedAt.substring(0, 10) : datetime.date.today().isoformat()) + "'}; " +
+                      "if os.path.exists(path): " +
+                      "  try: " +
+                      "    with open(path, 'r') as f: data = json.load(f) " +
+                      "  except: pass; " +
+                      "data['currentBalance'] = " + val + "; " +
+                      "with open(path, 'w') as f: json.dump(data, f, indent=2)"
+                    ]
+                    saveConfigProcess.running = true
                   }
-                }
-              }
-            }
-
-            Button {
-              id: saveButton
-              width: parent.width
-              text: "Guthaben Speichern"
-              bordered: true
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              verticalPadding: Style.spacing.controlPaddingY
-              onClicked: {
-                var balVal = parseFloat(balanceField.text)
-                var fundVal = parseFloat(fundedField.text)
-                if (!isNaN(balVal) && !isNaN(fundVal)) {
-                  saveConfigProcess.command = ["python3", "-c", 
-                    "import json, os, datetime; " +
-                    "path = os.path.expanduser('~/.config/omarchy/agents/gemini.json'); " +
-                    "data = {'fundedAmount': " + fundVal + ", 'currentBalance': " + balVal + ", 'currency': 'EUR', 'fundedAt': '" + (root.record ? root.record.updatedAt.substring(0, 10) : datetime.date.today().isoformat()) + "'}; " +
-                    "with open(path, 'w') as f: json.dump(data, f, indent=2)"
-                  ]
-                  saveConfigProcess.running = true
                 }
               }
             }
