@@ -4,39 +4,40 @@ import sys
 import json
 import glob
 import datetime
+import sqlite3
 from pathlib import Path
 
-def calculate_cost(model_usage):
-    # Prices are in USD per 1 Million tokens
-    # Map model family patterns to (input_price_per_1M, output_price_per_1M, cached_price_per_1M)
-    pricing_map = {
-        "gemini-3.5-flash": (1.50, 9.00, 0.15),
-        "gemini-3.7-flash": (0.75, 3.75, 0.075),
-        "gemini-3.6-flash": (0.75, 3.75, 0.075),
-        "gemini-3.1-pro": (2.00, 12.00, 0.20),
-        "gemini-1.5-flash": (0.075, 0.30, 0.01875),
-        "gemini-1.5-pro": (1.25, 5.00, 0.3125),
+# Prices in USD per 1 Million tokens
+# (input_price_per_1M, output_price_per_1M, cached_price_per_1M)
+PRICING_MAP = {
+    "gemini-3.5-flash": (1.50, 9.00, 0.15),
+    "gemini-3.7-flash": (0.75, 3.75, 0.075),
+    "gemini-3.6-flash": (0.75, 3.75, 0.075),
+    "gemini-3-flash-preview": (0.75, 3.75, 0.075),
+    "gemini-2.5-flash": (0.075, 0.30, 0.01875),
+    "gemini-3.1-pro": (2.00, 12.00, 0.20),
+    "gemini-1.5-flash": (0.075, 0.30, 0.01875),
+    "gemini-1.5-pro": (1.25, 5.00, 0.3125),
+}
+
+def calculate_bucket_cost(input_tokens, output_tokens, cached_tokens, model_name):
+    matched = "gemini-3.5-flash"
+    for p_model in PRICING_MAP:
+        if p_model in model_name:
+            matched = p_model
+            break
+            
+    inp_p, out_p, cach_p = PRICING_MAP[matched]
+    cost_usd = (input_tokens * inp_p + output_tokens * out_p + cached_tokens * cach_p) / 1000000.0
+    return cost_usd * 0.90
+
+def empty_bucket():
+    return {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
     }
-    
-    total_spent_usd = 0.0
-    for model_name, tokens in model_usage.items():
-        matched = "gemini-3.5-flash"
-        for p_model in pricing_map:
-            if p_model in model_name:
-                matched = p_model
-                break
-        
-        inp_p, out_p, cach_p = pricing_map[matched]
-        
-        inp = tokens.get("inputTokens") or 0
-        out = tokens.get("outputTokens") or 0
-        cach = tokens.get("cacheReadInputTokens") or 0
-        
-        cost = (inp * inp_p + out * out_p + cach * cach_p) / 1000000.0
-        total_spent_usd += cost
-        
-    # Convert USD to EUR (assuming standard conversion rate of ~0.90)
-    return total_spent_usd * 0.90
 
 def main():
     home = Path.home()
@@ -44,75 +45,72 @@ def main():
     usage_dir.mkdir(parents=True, exist_ok=True)
     gemini_json_path = usage_dir / "gemini.json"
 
-    # Get today and last 7 days in YYYY-MM-DD
+    # Read existing record if present to preserve historical tokens from deleted CLI sessions
+    existing_record = {}
+    if gemini_json_path.exists():
+        try:
+            with open(gemini_json_path, "r") as f:
+                existing_record = json.load(f)
+        except Exception:
+            pass
+
     today_dt = datetime.date.today()
     recent_dates = [(today_dt - datetime.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
     today_str = today_dt.isoformat()
 
     recent = {day: {"date": day, "messageCount": 0} for day in recent_dates}
     
+    # Pre-fill recent from existing record if available
+    for rd in existing_record.get("recentDays") or []:
+        d = rd.get("date")
+        if d in recent and d != today_str:
+            recent[d]["messageCount"] = rd.get("messageCount") or 0
+
     today_prompt_count = 0
     today_sessions = set()
     today_token_total = 0
     today_tokens_by_model = {}
-    
-    total_prompts = 0
-    sessions = set()
-    active_days = set()
-    model_usage = {}
-    processed_message_ids = set()
+    today_cost_by_model = {}
 
-    def empty_bucket():
-        return {
-            "inputTokens": 0,
-            "outputTokens": 0,
-            "cacheReadInputTokens": 0,
-            "cacheCreationInputTokens": 0,
+    scanned_prompts = 0
+    sessions = set()
+    active_days = set(existing_record.get("activeDates") or [])
+
+    model_usage = {}
+    for m_name, m_data in (existing_record.get("modelUsage") or {}).items():
+        model_usage[m_name] = {
+            "inputTokens": m_data.get("inputTokens") or 0,
+            "outputTokens": m_data.get("outputTokens") or 0,
+            "cacheReadInputTokens": m_data.get("cacheReadInputTokens") or 0,
+            "cacheCreationInputTokens": m_data.get("cacheCreationInputTokens") or 0,
         }
 
-    def process_message(msg, session_id):
-        nonlocal total_prompts, today_prompt_count, today_token_total
+    scanned_model_usage = {}
+    processed_message_ids = set()
+
+    def process_message(msg_id, session_id, dt, model, input_tokens, output_tokens, cached_tokens, cache_creation_tokens=0):
+        nonlocal scanned_prompts, today_prompt_count, today_token_total
         
-        # Deduplicate using message ID to prevent double-counting across different jsonl lines
-        msg_id = msg.get("id")
         if msg_id:
             if msg_id in processed_message_ids:
                 return
             processed_message_ids.add(msg_id)
 
-        ts_str = msg.get("timestamp")
-        if ts_str:
-            try:
-                # Parse timestamp to local date
-                dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                day_str = dt.date().isoformat()
-            except Exception:
-                day_str = today_str
-        else:
-            day_str = today_str
-
-        tokens = msg.get("tokens") or {}
-        input_tokens = int(tokens.get("input") or 0)
-        output_tokens = int(tokens.get("output") or 0)
-        cached_tokens = int(tokens.get("cached") or 0)
-        thoughts_tokens = int(tokens.get("thoughts") or 0)
-        tool_tokens = int(tokens.get("tool") or 0)
-        total = input_tokens + output_tokens + cached_tokens + thoughts_tokens + tool_tokens
+        day_str = dt.date().isoformat()
+        total = input_tokens + output_tokens + cached_tokens + cache_creation_tokens
 
         if total <= 0:
             return
 
-        model = str(msg.get("model") or "gemini-3.5-flash").rstrip("/").split("/")[-1]
-
         sessions.add(session_id)
         active_days.add(day_str)
-        total_prompts += 1
+        scanned_prompts += 1
 
-        # Update modelUsage
-        bucket = model_usage.setdefault(model, empty_bucket())
+        bucket = scanned_model_usage.setdefault(model, empty_bucket())
         bucket["inputTokens"] += input_tokens
         bucket["outputTokens"] += output_tokens
         bucket["cacheReadInputTokens"] += cached_tokens
+        bucket["cacheCreationInputTokens"] += cache_creation_tokens
 
         if day_str in recent:
             recent[day_str]["messageCount"] += total
@@ -122,14 +120,16 @@ def main():
             today_sessions.add(session_id)
             today_token_total += total
             today_tokens_by_model[model] = today_tokens_by_model.get(model, 0) + total
+            
+            cost = calculate_bucket_cost(input_tokens, output_tokens, cached_tokens, model)
+            today_cost_by_model[model] = today_cost_by_model.get(model, 0.0) + cost
 
-    # Search for all Gemini CLI session files in ~/.gemini/tmp/*/chats/*
+    # 1. Search for Gemini CLI session files in ~/.gemini/tmp/*/chats/*
     for ext in ("*.json", "*.jsonl"):
         search_path = str(home / ".gemini" / "tmp" / "*" / "chats" / ext)
         for file_path_str in glob.glob(search_path):
             try:
                 if file_path_str.endswith(".jsonl"):
-                    # Process JSON Lines format
                     session_id = None
                     with open(file_path_str, "r") as f:
                         for line in f:
@@ -140,49 +140,146 @@ def main():
                                 data = json.loads(line)
                             except Exception:
                                 continue
-                            
                             if "sessionId" in data:
                                 session_id = data["sessionId"]
-                            
                             if isinstance(data, dict):
                                 messages = []
                                 if data.get("type") == "gemini":
                                     messages = [data]
                                 elif "$set" in data and isinstance(data["$set"], dict) and "messages" in data["$set"]:
                                     messages = data["$set"]["messages"]
-                                
                                 for msg in messages:
                                     if isinstance(msg, dict) and msg.get("type") == "gemini":
-                                        process_message(msg, session_id or "unknown_session")
+                                        msg_id = msg.get("id")
+                                        ts_str = msg.get("timestamp")
+                                        if ts_str:
+                                            try:
+                                                dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                            except Exception:
+                                                dt = datetime.datetime.now(datetime.timezone.utc)
+                                        else:
+                                            dt = datetime.datetime.now(datetime.timezone.utc)
+                                        tokens = msg.get("tokens") or {}
+                                        inp = int(tokens.get("input") or 0)
+                                        out = int(tokens.get("output") or 0) + int(tokens.get("thoughts") or 0) + int(tokens.get("tool") or 0)
+                                        cach = int(tokens.get("cached") or 0)
+                                        model = str(msg.get("model") or "gemini-3.5-flash").rstrip("/").split("/")[-1]
+                                        process_message(msg_id, session_id or "unknown_session", dt, model, inp, out, cach)
                 else:
-                    # Process standard JSON format
                     with open(file_path_str, "r") as f:
                         data = json.load(f)
-                    session_id = data.get("sessionId")
-                    if not session_id:
-                        continue
+                    session_id = data.get("sessionId") or "unknown_session"
                     messages = data.get("messages") or []
                     for msg in messages:
                         if isinstance(msg, dict) and msg.get("type") == "gemini":
-                            process_message(msg, session_id)
+                            msg_id = msg.get("id")
+                            ts_str = msg.get("timestamp")
+                            if ts_str:
+                                try:
+                                    dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                except Exception:
+                                    dt = datetime.datetime.now(datetime.timezone.utc)
+                            else:
+                                dt = datetime.datetime.now(datetime.timezone.utc)
+                            tokens = msg.get("tokens") or {}
+                            inp = int(tokens.get("input") or 0)
+                            out = int(tokens.get("output") or 0) + int(tokens.get("thoughts") or 0) + int(tokens.get("tool") or 0)
+                            cach = int(tokens.get("cached") or 0)
+                            model = str(msg.get("model") or "gemini-3.5-flash").rstrip("/").split("/")[-1]
+                            process_message(msg_id, session_id, dt, model, inp, out, cach)
             except Exception:
                 continue
 
-    # Calculate balance details
-    funded_budget = float(os.environ.get("GEMINI_FUNDED_BUDGET") or 25.0)
-    currency = os.environ.get("GEMINI_CURRENCY") or "EUR"
-    
-    # Calculate local spent
-    spent = calculate_cost(model_usage)
-    if currency != "EUR":
-        # Adjust spent if currency is USD (pricing is calculated in USD, converted to EUR by default)
-        # Convert EUR back to USD
-        spent = spent / 0.90
-        
-    remaining = max(0.0, funded_budget - spent)
+    # 2. Search for Opencode messages in ~/.local/share/opencode/opencode.db
+    opencode_db = home / ".local" / "share" / "opencode" / "opencode.db"
+    if opencode_db.exists():
+        try:
+            conn = sqlite3.connect(f"file:{opencode_db}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            rows = cursor.execute("SELECT id, session_id, time_created, data FROM message").fetchall()
+            for r in rows:
+                data_raw = r["data"]
+                if not data_raw:
+                    continue
+                try:
+                    data = json.loads(data_raw)
+                except Exception:
+                    continue
+                
+                role = data.get("role")
+                provider = data.get("providerID")
+                model = data.get("modelID") or data.get("model") or "gemini-3.6-flash"
+                if isinstance(model, dict):
+                    model = model.get("modelID") or model.get("model") or "gemini-3.6-flash"
+                
+                if role == "assistant" and (provider == "google" or (model and "gemini" in str(model))):
+                    msg_id = r["id"]
+                    session_id = r["session_id"]
+                    time_info = data.get("time") or {}
+                    created_ms = time_info.get("created") or r["time_created"]
+                    dt = datetime.datetime.fromtimestamp(created_ms / 1000.0, tz=datetime.timezone.utc)
+                    
+                    tokens = data.get("tokens") or {}
+                    inp = int(tokens.get("input") or 0)
+                    out = int(tokens.get("output") or 0) + int(tokens.get("reasoning") or 0)
+                    cache_dict = tokens.get("cache") or {}
+                    cach_read = int(cache_dict.get("read") or 0)
+                    cach_write = int(cache_dict.get("write") or 0)
+                    
+                    model_name = str(model).rstrip("/").split("/")[-1]
+                    process_message(msg_id, session_id, dt, model_name, inp, out, cach_read, cach_write)
+            conn.close()
+        except Exception:
+            pass
 
-    # Ensure there is some basic metadata even if no usage is found
-    has_data = total_prompts > 0
+    # Merge scanned model usage into base model_usage
+    for m_name, scanned_b in scanned_model_usage.items():
+        base_b = model_usage.setdefault(m_name, empty_bucket())
+        base_b["inputTokens"] = max(base_b["inputTokens"], scanned_b["inputTokens"])
+        base_b["outputTokens"] = max(base_b["outputTokens"], scanned_b["outputTokens"])
+        base_b["cacheReadInputTokens"] = max(base_b["cacheReadInputTokens"], scanned_b["cacheReadInputTokens"])
+        base_b["cacheCreationInputTokens"] = max(base_b["cacheCreationInputTokens"], scanned_b["cacheCreationInputTokens"])
+
+    total_spent_eur = sum(
+        calculate_bucket_cost(b["inputTokens"], b["outputTokens"], b["cacheReadInputTokens"], m_name)
+        for m_name, b in model_usage.items()
+    )
+    today_spent_eur = sum(today_cost_by_model.values())
+
+    # 3. Read agent config for Google AI Studio prepayment/billing info
+    gemini_cfg_path = home / ".config" / "omarchy" / "agents" / "gemini.json"
+    balance_obj = None
+    
+    if gemini_cfg_path.exists():
+        try:
+            with open(gemini_cfg_path, "r") as f:
+                cfg = json.load(f)
+                funded = cfg.get("fundedAmount")
+                current = cfg.get("currentBalance")
+                curr = cfg.get("currency") or "EUR"
+                
+                if funded is not None and current is not None:
+                    spent = float(funded) - float(current)
+                    balance_obj = {
+                        "remaining": float(current),
+                        "funded": float(funded),
+                        "spent": spent,
+                        "currency": curr,
+                        "estimated": False
+                    }
+        except Exception:
+            pass
+
+    tot_prompts = max(existing_record.get("totalPrompts") or 0, scanned_prompts)
+    tot_sessions = max(existing_record.get("totalSessions") or 0, len(sessions))
+    has_data = tot_prompts > 0 or len(model_usage) > 0
+
+    if balance_obj:
+        tier_label = f"Prepaid · {balance_obj['remaining']:.2f} {balance_obj['currency']} verbleibend ({today_spent_eur:.2f} € heute)"
+    else:
+        tier_label = f"Pay-as-you-go · {today_spent_eur:.2f} € heute ({total_spent_eur:.2f} € gesamt)" if today_spent_eur > 0 else f"Pay-as-you-go · {total_spent_eur:.2f} € gesamt"
+
     record = {
         "schemaVersion": 1,
         "id": "gemini",
@@ -190,8 +287,8 @@ def main():
         "updatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "ready": has_data,
         "hasLocalStats": True,
-        "tierLabel": "Pay-as-you-go" if has_data else "",
-        "usageStatusText": "" if has_data else "No usage recorded yet",
+        "tierLabel": tier_label if has_data else "",
+        "usageStatusText": "",
         "authHelpText": "",
         "limits": [],
         "todayPrompts": today_prompt_count,
@@ -200,17 +297,11 @@ def main():
         "todayTokensByModel": today_tokens_by_model,
         "recentDays": [recent[day] for day in recent_dates],
         "modelUsage": model_usage,
-        "totalPrompts": total_prompts,
-        "totalSessions": len(sessions),
+        "totalPrompts": tot_prompts,
+        "totalSessions": tot_sessions,
         "activeDays": len(active_days),
         "activeDates": sorted(list(active_days)),
-        "balance": {
-            "funded": funded_budget,
-            "spent": round(spent, 4),
-            "remaining": round(remaining, 4),
-            "currency": currency,
-            "estimated": True
-        }
+        "balance": balance_obj
     }
 
     try:

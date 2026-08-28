@@ -2,13 +2,24 @@
   "schemaVersion": 1,
   "id": "oma.gemi",
   "name": "OmaGemi",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "5t0ll1",
   "license": "MIT",
-  "description": "Native Omarchy service plugin that aggregates Gemini CLI usage statistics for the status bar Agents widget.",
-  "kinds": ["service"],
+  "description": "Native Omarchy service and bar-widget plugin that aggregates Gemini usage and displays a dynamic Gemini icon in the topbar.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
   "activation": "on-demand",
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Gemini Icon",
+    "description": "Displays the Gemini icon on the topbar dynamically when in use.",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right"
   }
 }
