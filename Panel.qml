@@ -266,6 +266,20 @@ Panel {
             }
           }
 
+          // ---------- Details Section ----------
+          PanelSeparator {
+            foreground: root.foreground
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.spacing.labelGap
+            InfoPair { label: "Today's Prompts"; value: root.record ? String(root.record.todayPrompts) : "0" }
+            InfoPair { label: "Today's Sessions"; value: root.record ? String(root.record.todaySessions) : "0" }
+            InfoPair { label: "Total Tokens Today"; value: root.record ? root.formatTokenCount(root.record.todayTotalTokens) : "0" }
+            InfoPair { label: "Active Days"; value: root.record ? String(root.record.activeDays) : "0" }
+          }
+
           // ---------- Balance Section ----------
           PanelSeparator {
             visible: !!root.balance
@@ -329,20 +343,6 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
-          }
-
-          // ---------- Details Section ----------
-          PanelSeparator {
-            foreground: root.foreground
-          }
-
-          Column {
-            width: parent.width
-            spacing: Style.spacing.labelGap
-            InfoPair { label: "Today's Prompts"; value: root.record ? String(root.record.todayPrompts) : "0" }
-            InfoPair { label: "Today's Sessions"; value: root.record ? String(root.record.todaySessions) : "0" }
-            InfoPair { label: "Total Tokens Today"; value: root.record ? root.formatTokenCount(root.record.todayTotalTokens) : "0" }
-            InfoPair { label: "Active Days"; value: root.record ? String(root.record.activeDays) : "0" }
           }
 
           // ---------- Top-up Input Section ----------
